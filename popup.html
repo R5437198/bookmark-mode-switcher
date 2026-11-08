@@ -3,25 +3,87 @@
 <head>
   <meta charset="utf-8">
   <style>
-    body { font: 13px system-ui, sans-serif; margin: 0; padding: 12px; width: 200px; }
-    h1 { font-size: 12px; color: #666; margin: 0 0 8px; font-weight: normal; }
-    button {
-      display: block; width: 100%; padding: 8px; margin: 4px 0;
-      border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; font: inherit;
+    :root {
+      --bg: #fff; --fg: #202124; --muted: #5f6368; --line: #dadce0;
+      --hover: #f1f3f4; --accent: #1a73e8; --accent-fg: #fff; --danger: #d93025;
     }
-    button:hover:not(:disabled) { background: #f2f2f2; }
-    button:disabled { background: #1a73e8; color: #fff; border-color: #1a73e8; cursor: default; }
-    #err { color: #c00; font-size: 12px; margin-top: 6px; }
     @media (prefers-color-scheme: dark) {
-      body { background: #222; color: #eee; }
-      button { background: #333; color: #eee; border-color: #555; }
-      button:hover:not(:disabled) { background: #3d3d3d; }
+      :root {
+        --bg: #202124; --fg: #e8eaed; --muted: #9aa0a6; --line: #5f6368;
+        --hover: #303134; --accent: #8ab4f8; --accent-fg: #202124; --danger: #f28b82;
+      }
     }
+    body { font: 13px system-ui, sans-serif; margin: 0; padding: 12px; width: 240px; background: var(--bg); color: var(--fg); }
+    header { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; min-height: 24px; }
+    h1 { flex: 1; font-size: 12px; color: var(--muted); margin: 0; font-weight: normal; }
+    .icon-btn {
+      display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+      border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer;
+    }
+    .icon-btn:hover { background: var(--hover); color: var(--fg); }
+    .icon-btn svg { width: 16px; height: 16px; }
+    [hidden] { display: none !important; }
+
+    /* 切替ビュー */
+    .mode {
+      display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 10px; margin: 4px 0;
+      border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg);
+      cursor: pointer; font: inherit; text-align: left;
+    }
+    .mode:hover:not(:disabled) { background: var(--hover); }
+    .mode:disabled { cursor: default; }
+    .mode.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+    .count { opacity: .7; font-size: 11px; }
+
+    /* 編集ビュー */
+    .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+    .row input {
+      flex: 1; min-width: 0; padding: 6px 8px; font: inherit; color: var(--fg); background: var(--bg);
+      border: 1px solid var(--line); border-radius: 6px;
+    }
+    .row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+    .row input.active { border-color: var(--accent); }
+    .row .count { flex-shrink: 0; width: 28px; text-align: right; color: var(--muted); }
+    .del { color: var(--muted); }
+    .del:hover:not(:disabled) { color: var(--danger); }
+    .del:disabled { opacity: .3; cursor: default; }
+    .del.confirm { width: auto; padding: 0 8px; border-radius: 12px; background: var(--danger); color: var(--bg); font: inherit; font-size: 11px; }
+    .add { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .add button {
+      padding: 6px 10px; font: inherit; border: 0; border-radius: 6px;
+      background: var(--accent); color: var(--accent-fg); cursor: pointer;
+    }
+    .hint { color: var(--muted); font-size: 11px; margin: 8px 0 0; }
+    #err { color: var(--danger); font-size: 12px; margin-top: 6px; }
+    #err:empty { display: none; }
   </style>
 </head>
 <body>
-  <h1>ブックマークモード</h1>
-  <div id="modes"></div>
+  <section id="switch-view">
+    <header>
+      <h1>ブックマークモード</h1>
+      <button class="icon-btn" id="open-edit" title="モードを編集" aria-label="モードを編集">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94a7.07 7.07 0 0 0 0-1.88l2.03-1.58a.48.48 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.71 8.87a.48.48 0 0 0 .12.61l2.03 1.58a7.07 7.07 0 0 0 0 1.88l-2.03 1.58a.48.48 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.03-1.58ZM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2Z"/></svg>
+      </button>
+    </header>
+    <div id="modes"></div>
+  </section>
+
+  <section id="edit-view" hidden>
+    <header>
+      <button class="icon-btn" id="close-edit" title="戻る" aria-label="戻る">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2Z"/></svg>
+      </button>
+      <h1>モードを編集</h1>
+    </header>
+    <div id="edit-list"></div>
+    <form class="row add" id="add-form">
+      <input id="add-name" placeholder="新しいモード名" maxlength="30" autocomplete="off">
+      <button type="submit">追加</button>
+    </form>
+    <p class="hint">名前はクリックして直接変更できる。青枠が使用中のモードで、これは削除できない。</p>
+  </section>
+
   <div id="err"></div>
   <script src="popup.js"></script>
 </body>

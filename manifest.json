@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Bookmark Mode Switcher",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ブックマークバーの中身を「開発」「普段」などのモードで切り替える",
   "permissions": ["bookmarks"],
   "icons": {

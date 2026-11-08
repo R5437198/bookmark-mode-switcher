@@ -1,10 +1,14 @@
 // モード管理のコアロジック。
-// 「その他のブックマーク」直下の CONTAINER フォルダに待機中モードのサブフォルダを置く。
-// アクティブなモードはブックマークバーに展開されていて、コンテナには存在しない。
+// 「その他のブックマーク」直下の CONTAINER フォルダに、モードごとのサブフォルダを並べる。
+// アクティブなモードの中身はブックマークバーに展開されていて、そのスロットには
+// "__active__:<名前>" という空フォルダ（マーカー）が置かれる。
 // 状態はフォルダ構成そのもので、storage には何も持たない。
+// モードの表示順 = コンテナ内のフォルダ順（マーカーがアクティブモードの位置を占める）。
 
 export const CONTAINER = 'Bookmark Modes';
-const DEFAULT_MODES = ['普段', '開発']; // 先頭が初期アクティブ
+const DEFAULT_MODES = ['普段', '開発']; // 初回作成時のみ使う。先頭が初期アクティブ
+const MARK = '__active__:';
+const MAX_NAME = 30;
 
 async function getRoots() {
   const [root] = await chrome.bookmarks.getTree();
@@ -21,13 +25,13 @@ async function getRoots() {
   return { bar, other };
 }
 
-async function getContainer(other, { create }) {
+async function getContainer(other) {
   const children = await chrome.bookmarks.getChildren(other.id);
   let c = children.find((n) => !n.url && n.title === CONTAINER);
-  if (!c && create) {
+  if (!c) {
     c = await chrome.bookmarks.create({ parentId: other.id, title: CONTAINER });
     // 初回: 現在のバーを DEFAULT_MODES[0] とみなし、残りを空フォルダで用意する
-    await chrome.bookmarks.create({ parentId: c.id, title: '__active__:' + DEFAULT_MODES[0] });
+    await chrome.bookmarks.create({ parentId: c.id, title: MARK + DEFAULT_MODES[0] });
     for (const m of DEFAULT_MODES.slice(1)) {
       await chrome.bookmarks.create({ parentId: c.id, title: m });
     }
@@ -35,24 +39,36 @@ async function getContainer(other, { create }) {
   return c;
 }
 
-// コンテナ内の "__active__:<name>" という空フォルダがアクティブモード名のマーカー。
-// バー側に目印を置かないので、バーの見た目は一切汚れない。
-const MARK = '__active__:';
+function countUrls(node) {
+  if (node.url) return 1;
+  return (node.children ?? []).reduce((s, n) => s + countUrls(n), 0);
+}
 
 export async function getState() {
   const { bar, other } = await getRoots();
-  const c = await getContainer(other, { create: true });
-  const kids = (await chrome.bookmarks.getChildren(c.id)).filter((n) => !n.url);
-  const marker = kids.find((n) => n.title.startsWith(MARK));
-  const active = marker ? marker.title.slice(MARK.length) : DEFAULT_MODES[0];
-  const inactive = kids.filter((n) => n !== marker).map((n) => n.title);
-  return { bar, container: c, marker, active, modes: [active, ...inactive].sort(order) };
-}
-
-function order(a, b) {
-  const ia = DEFAULT_MODES.indexOf(a), ib = DEFAULT_MODES.indexOf(b);
-  if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-  return a.localeCompare(b, 'ja');
+  const container = await getContainer(other);
+  const kids = (await chrome.bookmarks.getChildren(container.id)).filter((n) => !n.url);
+  let marker = kids.find((n) => n.title.startsWith(MARK));
+  if (!marker) {
+    // 切替中にクラッシュした等でマーカーが無い。バーを名前未定のモードとして復旧する
+    const used = new Set(kids.map((n) => n.title));
+    let name = '復旧', i = 2;
+    while (used.has(name)) name = `復旧${i++}`;
+    marker = await chrome.bookmarks.create({ parentId: container.id, title: MARK + name });
+    kids.push(marker);
+  }
+  const active = marker.title.slice(MARK.length);
+  const [barTree] = await chrome.bookmarks.getSubTree(bar.id);
+  const modes = [];
+  for (const n of kids) {
+    if (n === marker) {
+      modes.push({ name: active, count: countUrls(barTree), active: true });
+    } else {
+      const [t] = await chrome.bookmarks.getSubTree(n.id);
+      modes.push({ name: n.title, count: countUrls(t), active: false });
+    }
+  }
+  return { bar, container, marker, active, kids, modes };
 }
 
 async function moveAll(fromId, toId) {
@@ -62,38 +78,76 @@ async function moveAll(fromId, toId) {
   }
 }
 
-let busy = false;
+// 書き込み系は直列化する（ポップアップとショートカットの同時実行対策）
+let queue = Promise.resolve();
+function exclusive(fn) {
+  const run = queue.then(fn, fn);
+  queue = run.catch(() => {});
+  return run;
+}
 
-export async function switchTo(target) {
-  if (busy) throw new Error('切替中だ。少し待て');
-  busy = true;
-  try {
+function findMode(st, name) {
+  if (name === st.active) return st.marker;
+  const n = st.kids.find((k) => k !== st.marker && k.title === name);
+  if (!n) throw new Error(`モード "${name}" が見つからない`);
+  return n;
+}
+
+function validateName(st, raw, { except } = {}) {
+  const name = String(raw ?? '').trim();
+  if (!name) throw new Error('名前が空だ');
+  if (name.length > MAX_NAME) throw new Error(`名前は ${MAX_NAME} 文字以内にしてくれ`);
+  if (name.startsWith(MARK)) throw new Error(`"${MARK}" で始まる名前は使えない`);
+  if (name !== except && st.modes.some((m) => m.name === name)) {
+    throw new Error(`"${name}" は既にある`);
+  }
+  return name;
+}
+
+export const switchTo = (target) =>
+  exclusive(async () => {
     const st = await getState();
     if (target === st.active) return st;
-    const kids = await chrome.bookmarks.getChildren(st.container.id);
-    const dest = kids.find((n) => !n.url && n.title === target);
-    if (!dest) throw new Error(`モード "${target}" が見つからない`);
-
-    // 1. 現在のバーを退避フォルダへ
-    const park = await chrome.bookmarks.create({ parentId: st.container.id, title: st.active });
-    await moveAll(st.bar.id, park.id);
-    // 2. 対象モードをバーへ
+    const dest = findMode(st, target);
+    // マーカーフォルダをそのまま退避先にし、dest を新しいマーカーにする。
+    // フォルダの位置が動かないので表示順が保たれる。
+    await moveAll(st.bar.id, st.marker.id);
+    await chrome.bookmarks.update(st.marker.id, { title: st.active });
     await moveAll(dest.id, st.bar.id);
-    await chrome.bookmarks.remove(dest.id);
-    // 3. マーカー更新
-    if (st.marker) {
-      await chrome.bookmarks.update(st.marker.id, { title: MARK + target });
-    } else {
-      await chrome.bookmarks.create({ parentId: st.container.id, title: MARK + target });
-    }
-    return await getState();
-  } finally {
-    busy = false;
-  }
-}
+    await chrome.bookmarks.update(dest.id, { title: MARK + target });
+    return getState();
+  });
 
-export async function cycle() {
-  const st = await getState();
-  const i = st.modes.indexOf(st.active);
-  return switchTo(st.modes[(i + 1) % st.modes.length]);
-}
+export const cycle = () =>
+  getState().then((st) => {
+    const i = st.modes.findIndex((m) => m.active);
+    return switchTo(st.modes[(i + 1) % st.modes.length].name);
+  });
+
+export const addMode = (raw) =>
+  exclusive(async () => {
+    const st = await getState();
+    const name = validateName(st, raw);
+    await chrome.bookmarks.create({ parentId: st.container.id, title: name });
+    return getState();
+  });
+
+export const renameMode = (from, raw) =>
+  exclusive(async () => {
+    const st = await getState();
+    const node = findMode(st, from);
+    const name = validateName(st, raw, { except: from });
+    if (name === from) return st;
+    const title = from === st.active ? MARK + name : name;
+    await chrome.bookmarks.update(node.id, { title });
+    return getState();
+  });
+
+export const deleteMode = (name) =>
+  exclusive(async () => {
+    const st = await getState();
+    if (name === st.active) throw new Error('使用中のモードは削除できない');
+    const node = findMode(st, name);
+    await chrome.bookmarks.removeTree(node.id);
+    return getState();
+  });
