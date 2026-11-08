@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Bookmark Mode Switcher",
+  "version": "0.1.0",
+  "description": "ブックマークバーの中身を「開発」「普段」などのモードで切り替える",
+  "permissions": ["bookmarks"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "ブックマークモード切替",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    },
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "toggle-mode": {
+      "suggested_key": { "default": "Alt+Shift+B" },
+      "description": "次のモードへ切り替える"
+    }
+  }
+}

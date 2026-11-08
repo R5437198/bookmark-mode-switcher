@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px system-ui, sans-serif; margin: 0; padding: 12px; width: 200px; }
+    h1 { font-size: 12px; color: #666; margin: 0 0 8px; font-weight: normal; }
+    button {
+      display: block; width: 100%; padding: 8px; margin: 4px 0;
+      border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; font: inherit;
+    }
+    button:hover:not(:disabled) { background: #f2f2f2; }
+    button:disabled { background: #1a73e8; color: #fff; border-color: #1a73e8; cursor: default; }
+    #err { color: #c00; font-size: 12px; margin-top: 6px; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #222; color: #eee; }
+      button { background: #333; color: #eee; border-color: #555; }
+      button:hover:not(:disabled) { background: #3d3d3d; }
+    }
+  </style>
+</head>
+<body>
+  <h1>ブックマークモード</h1>
+  <div id="modes"></div>
+  <div id="err"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
